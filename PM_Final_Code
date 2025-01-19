@@ -1,0 +1,780 @@
+#include <xc.h>
+#include <stdint.h>
+#include <stdio.h>
+#include "config.h"  // Configuration file for your PIC
+
+// Define sensor pins (adjust as per your wiring)
+#define TEMP_SENSOR_PIN   0    // ADC Channel 0 (Temperature)
+#define SOUND_SENSOR_PIN  1    // ADC Channel 1 (Sound)
+#define SPEED_SENSOR_PIN  2    // ADC Channel 2 (Speed)
+#define GAS_SENSOR_PIN    3    // ADC Channel 3 (Gas)
+
+// Define LCD control pins (adjust based on your hardware)
+#define RS LATBbits.LATB0    // Register Select Pin for LCD
+#define EN LATBbits.LATB1    // Enable Pin for LCD
+#define D4 LATBbits.LATB2    // Data Pin D4 for LCD
+#define D5 LATBbits.LATB3    // Data Pin D5 for LCD
+#define D6 LATBbits.LATB4    // Data Pin D6 for LCD
+#define D7 LATBbits.LATB5    // Data Pin D7 for LCD
+
+// ADC functions for sensor reading
+uint16_t ADC_Read(uint8_t channel);
+void ADC_Init(void);
+
+// UART communication functions
+void UART_Init(void);
+void UART_Write(uint8_t data);
+void UART_WriteString(const char* str);
+
+// LCD functions for displaying data (simplified)
+void LCD_Init(void);
+void LCD_Clear(void);
+void LCD_Command(uint8_t cmd);
+void LCD_Data(uint8_t data);
+void LCD_DisplayString(const char* str);
+
+// Function to display a number on the LCD
+void LCD_DisplayNumber(uint16_t num);
+
+void main() {
+    uint16_t temp_value, sound_value, speed_value, gas_value;
+
+    // Initialize hardware (LCD, ADC, UART)
+    LCD_Init();
+    ADC_Init();
+    UART_Init();
+
+    while (1) {
+        // Read sensor values
+        temp_value = ADC_Read(TEMP_SENSOR_PIN);
+        sound_value = ADC_Read(SOUND_SENSOR_PIN);
+        speed_value = ADC_Read(SPEED_SENSOR_PIN);
+        gas_value = ADC_Read(GAS_SENSOR_PIN);
+
+        // Display data on LCD (optional)
+        LCD_Clear();
+        LCD_DisplayString("Temp: ");
+        LCD_DisplayNumber(temp_value);
+        __delay_ms(500);
+
+        LCD_Clear();
+        LCD_DisplayString("Sound: ");
+        LCD_DisplayNumber(sound_value);
+        __delay_ms(500);
+
+        LCD_Clear();
+        LCD_DisplayString("Speed: ");
+        LCD_DisplayNumber(speed_value);
+        __delay_ms(500);
+
+        LCD_Clear();
+        LCD_DisplayString("Gas: ");
+        LCD_DisplayNumber(gas_value);
+        __delay_ms(500);
+
+        // Send data via UART for remote monitoring
+        char uart_buffer[100];
+        sprintf(uart_buffer, "Temp: %d, Sound: %d, Speed: %d, Gas: %d", temp_value, sound_value, speed_value, gas_value);
+        UART_WriteString(uart_buffer);
+
+        // Delay between readings
+        __delay_ms(1000);  // Adjust delay as per required sampling rate
+    }
+}
+
+// ADC Initialization
+void ADC_Init(void) {
+    // Configure the ADC module (Right justify result, VDD as reference)
+    ADCON1 = 0x00;  // Set all pins to analog input (AN0-AN3)
+    ADCON2 = 0x00;  // Set the ADC conversion time, VDD reference
+}
+
+// ADC Read function
+uint16_t ADC_Read(uint8_t channel) {
+    // Set ADC channel (AN0-AN3)
+    ADCON0 = (channel << 2);  
+    GO_nDONE = 1;  // Start the conversion
+    while (GO_nDONE);  // Wait for conversion to complete
+    return (ADRESH << 8) | ADRESL;  // Return the 10-bit ADC result
+}
+
+// UART Initialization
+void UART_Init(void) {
+    // Setup the UART for communication (9600 baud rate, assuming 4MHz clock)
+    TXSTAbits.TXEN = 1;  // Enable transmitter
+    RCSTAbits.CREN = 1;  // Enable receiver
+    SPBRG = 25;          // Set baud rate for 9600 (assuming 4 MHz Fosc)
+}
+
+// UART Write function
+void UART_Write(uint8_t data) {
+    while (!TXSTAbits.TRMT);  // Wait until the transmit buffer is empty
+    TXREG = data;             // Send the data byte
+}
+
+// UART Write String function
+void UART_WriteString(const char* str) {
+    while (*str) {
+        UART_Write(*str++);  // Write each character until the null terminator
+    }
+}
+
+// LCD Initialization
+void LCD_Init(void) {
+    // Set control pins as output
+    TRISB = 0x00;  // Set all PORTB pins as output for the LCD control pins
+
+    // Initial LCD setup sequence (depends on the LCD module you're using)
+    __delay_ms(15);  // Wait for LCD to power up
+    LCD_Command(0x33);  // Initialize LCD (step 1)
+    LCD_Command(0x32);  // Initialize LCD (step 2)
+    LCD_Command(0x28);  // 4-bit mode, 2 lines, 5x7 font
+    LCD_Command(0x0C);  // Display ON, Cursor OFF
+    LCD_Command(0x06);  // Entry mode: Increment, no shift
+    LCD_Command(0x01);  // Clear display
+}
+
+// Send command to LCD
+void LCD_Command(uint8_t cmd) {
+    RS = 0;  // Select Command Register
+    LATB = (LATB & 0xC0) | (cmd >> 4);  // Send higher nibble
+    EN = 1;  // Enable pulse
+    __delay_ms(2);
+    EN = 0;
+    LATB = (LATB & 0xC0) | (cmd & 0x0F);  // Send lower nibble
+    EN = 1;  // Enable pulse
+    __delay_ms(2);
+    EN = 0;
+}
+
+// Send data to LCD
+void LCD_Data(uint8_t data) {
+    RS = 1;  // Select Data Register
+    LATB = (LATB & 0xC0) | (data >> 4);  // Send higher nibble
+    EN = 1;  // Enable pulse
+    __delay_ms(2);
+    EN = 0;
+    LATB = (LATB & 0xC0) | (data & 0x0F);  // Send lower nibble
+    EN = 1;  // Enable pulse
+    __delay_ms(2);
+    EN = 0;
+}
+
+// Display string on LCD
+void LCD_DisplayString(const char* str) {
+    while (*str) {
+        LCD_Data(*str++);
+    }
+}
+
+// Display number on LCD
+void LCD_DisplayNumber(uint16_t num) {
+    char buffer[5];  // Buffer to hold string representation of number
+    sprintf(buffer, "%d", num);
+    LCD_DisplayString(buffer);
+}
+// ADC functions for sensor reading
+uint16_t ADC_Read(uint8_t channel);
+void ADC_Init(void);
+
+// UART communication functions
+void UART_Init(void);
+void UART_Write(uint8_t data);
+void UART_WriteString(const char* str);
+
+// LCD functions for displaying data (simplified)
+void LCD_Init(void);
+void LCD_Clear(void);
+void LCD_Command(uint8_t cmd);
+void LCD_Data(uint8_t data);
+void LCD_DisplayString(const char* str);
+
+// Function to display a number on the LCD
+void LCD_DisplayNumber(uint16_t num);
+void LCD_DisplayError(const char* errorMessage);
+
+// Error handling
+void check_for_errors(uint16_t temp_value, uint16_t sound_value, uint16_t speed_value, uint16_t gas_value);
+
+// New functions for controlling motor
+void Motor_Control(uint16_t speed_value);
+
+// Main program
+void main() {
+    uint16_t temp_value, sound_value, speed_value, gas_value;
+
+    // Initialize hardware (LCD, ADC, UART)
+    LCD_Init();
+    ADC_Init();
+    UART_Init();
+
+    while (1) {
+        // Read sensor values
+        temp_value = ADC_Read(TEMP_SENSOR_PIN);
+        sound_value = ADC_Read(SOUND_SENSOR_PIN);
+        speed_value = ADC_Read(SPEED_SENSOR_PIN);
+        gas_value = ADC_Read(GAS_SENSOR_PIN);
+
+        // Check if any sensor value exceeds thresholds
+        check_for_errors(temp_value, sound_value, speed_value, gas_value);
+
+        // Display data on LCD
+        LCD_Clear();
+        LCD_DisplayString("Temp: ");
+        LCD_DisplayNumber(temp_value);
+        __delay_ms(500);
+
+        LCD_Clear();
+        LCD_DisplayString("Sound: ");
+        LCD_DisplayNumber(sound_value);
+        __delay_ms(500);
+
+        LCD_Clear();
+        LCD_DisplayString("Speed: ");
+        LCD_DisplayNumber(speed_value);
+        __delay_ms(500);
+
+        LCD_Clear();
+        LCD_DisplayString("Gas: ");
+        LCD_DisplayNumber(gas_value);
+        __delay_ms(500);
+
+        // Send data via UART for remote monitoring
+        char uart_buffer[100];
+        sprintf(uart_buffer, "Temp: %d, Sound: %d, Speed: %d, Gas: %d", temp_value, sound_value, speed_value, gas_value);
+        UART_WriteString(uart_buffer);
+
+        // Control motor if speed value exceeds threshold
+        Motor_Control(speed_value);
+
+        // Delay between readings
+        __delay_ms(1000);  // Adjust delay as per required sampling rate
+    }
+}
+
+// ADC Initialization
+void ADC_Init(void) {
+    // Configure the ADC module (Right justify result, VDD as reference)
+    ADCON1 = 0x00;  // Set all pins to analog input (AN0-AN3)
+    ADCON2 = 0x00;  // Set the ADC conversion time, VDD reference
+}
+
+// ADC Read function
+uint16_t ADC_Read(uint8_t channel) {
+    // Set ADC channel (AN0-AN3)
+    ADCON0 = (channel << 2);  
+    GO_nDONE = 1;  // Start the conversion
+    while (GO_nDONE);  // Wait for conversion to complete
+    return (ADRESH << 8) | ADRESL;  // Return the 10-bit ADC result
+}
+
+// UART Initialization
+void UART_Init(void) {
+    // Setup the UART for communication (9600 baud rate, assuming 4MHz clock)
+    TXSTAbits.TXEN = 1;  // Enable transmitter
+    RCSTAbits.CREN = 1;  // Enable receiver
+    SPBRG = 25;          // Set baud rate for 9600 (assuming 4 MHz Fosc)
+}
+
+// UART Write function
+void UART_Write(uint8_t data) {
+    while (!TXSTAbits.TRMT);  // Wait until the transmit buffer is empty
+    TXREG = data;             // Send the data byte
+}
+
+// UART Write String function
+void UART_WriteString(const char* str) {
+    while (*str) {
+        UART_Write(*str++);  // Write each character until the null terminator
+    }
+}
+
+// LCD Initialization
+void LCD_Init(void) {
+    // Set control pins as output
+    TRISB = 0x00;  // Set all PORTB pins as output for the LCD control pins
+
+    // Initial LCD setup sequence (depends on the LCD module you're using)
+    __delay_ms(15);  // Wait for LCD to power up
+    LCD_Command(0x33);  // Initialize LCD (step 1)
+    LCD_Command(0x32);  // Initialize LCD (step 2)
+    LCD_Command(0x28);  // 4-bit mode, 2 lines, 5x7 font
+    LCD_Command(0x0C);  // Display ON, Cursor OFF
+    LCD_Command(0x06);  // Entry mode: Increment, no shift
+    LCD_Command(0x01);  // Clear display
+}
+
+// Send command to LCD
+void LCD_Command(uint8_t cmd) {
+    RS = 0;  // Select Command Register
+    LATB = (LATB & 0xC0) | (cmd >> 4);  // Send higher nibble
+    EN = 1;  // Enable pulse
+    __delay_ms(2);
+    EN = 0;
+    LATB = (LATB & 0xC0) | (cmd & 0x0F);  // Send lower nibble
+    EN = 1;  // Enable pulse
+    __delay_ms(2);
+    EN = 0;
+}
+
+// Send data to LCD
+void LCD_Data(uint8_t data) {
+    RS = 1;  // Select Data Register
+    LATB = (LATB & 0xC0) | (data >> 4);  // Send higher nibble
+    EN = 1;  // Enable pulse
+    __delay_ms(2);
+    EN = 0;
+    LATB = (LATB & 0xC0) | (data & 0x0F);  // Send lower nibble
+    EN = 1;  // Enable pulse
+    __delay_ms(2);
+    EN = 0;
+}
+
+// Display string on LCD
+void LCD_DisplayString(const char* str) {
+    while (*str) {
+        LCD_Data(*str++);
+    }
+}
+
+// Display number on LCD
+void LCD_DisplayNumber(uint16_t num) {
+    char buffer[5];  // Buffer to hold string representation of number
+    sprintf(buffer, "%d", num);
+    LCD_DisplayString(buffer);
+}
+
+// Display error message on LCD
+void LCD_DisplayError(const char* errorMessage) {
+    LCD_Clear();
+    LCD_DisplayString("ERROR:");
+    LCD_DisplayString(errorMessage);
+}
+
+// Error Checking Function
+void check_for_errors(uint16_t temp_value, uint16_t sound_value, uint16_t speed_value, uint16_t gas_value) {
+    // Check if the temperature exceeds threshold (Overheating)
+    if (temp_value > OVERHEAT_THRESHOLD) {
+        LCD_DisplayError("Overheat!");
+        UART_WriteString("Warning: Overheating detected!\n");
+    }
+
+    // Check if sound value exceeds the noise threshold (potential fault)
+    if (sound_value > 100) {  // Assume 100 as a high sound threshold
+        LCD_DisplayError("High Noise!");
+        UART_WriteString("Warning: High Noise detected!\n");
+    }
+
+    // Check if speed is abnormal (motor overload)
+    if (speed_value > 500) {  // Assume 500 as max allowed speed
+        LCD_DisplayError("Speed Excess!");
+        UART_WriteString("Warning: Excess Speed detected!\n");
+    }
+
+    // Check if gas sensor detects a hazardous level
+    if (gas_value > 300) {  // Assume 300 as a dangerous gas level
+        LCD_DisplayError("Gas Leak!");
+        UART_WriteString("Warning: Gas Leak detected!\n");
+    }
+}
+
+// Motor Control function
+void Motor_Control(uint16_t speed_value) {
+    // Check for excessive speed and stop motor if necessary
+    if (speed_value > 500) {
+        LATCbits.LATC0 = 0;  // Stop motor (assuming motor control on LATC0)
+        UART_WriteString("Motor stopped due to high speed\n");
+    } else {
+        LATCbits.LATC0 = 1;  // Start motor
+    }
+}
+    LATB = (LATB & 0xC0) | (data & 0x0F);  // Send lower nibble
+    EN = 1;  // Enable pulse
+    __delay_ms(2);
+    EN = 0;
+}
+
+// Display string on LCD
+void LCD_DisplayString(const char* str) {
+    while (*str) {
+        LCD_Data(*str++);
+    }
+}
+
+// Display number on LCD
+void LCD_DisplayNumber(uint16_t num) {
+    char buffer[5];  // Buffer to hold string representation of number
+    sprintf(buffer, "%d", num);
+    LCD_DisplayString(buffer);
+}
+
+// Error handling for sensor readings
+void LCD_DisplayError(const char* errorMessage) {
+    LCD_Clear();
+    LCD_DisplayString("Error: ");
+    LCD_DisplayString(errorMessage);
+}
+
+// Check for sensor error conditions
+void check_for_errors(uint16_t temp_value, uint16_t sound_value, uint16_t speed_value, uint16_t gas_value) {
+    if (temp_value > 800) {  // Example threshold for temperature
+        LCD_DisplayError("High Temp");
+        UART_WriteString("Error: High Temperature!\n");
+    } else if (sound_value > 500) {  // Example threshold for sound
+        LCD_DisplayError("High Sound");
+        UART_WriteString("Error: High Sound Level!\n");
+    } else if (speed_value > 1000) {  // Example threshold for speed
+        LCD_DisplayError("High Speed");
+        UART_WriteString("Error: Speed Exceeded!\n");
+    } else if (gas_value > 400) {  // Example threshold for gas concentration
+        LCD_DisplayError("High Gas Level");
+        UART_WriteString("Error: High Gas Level!\n");
+    }
+}
+
+// Motor control function based on speed sensor value
+void Motor_Control(uint16_t speed_value) {
+    if (speed_value > 800) {  // Speed threshold for motor activation
+        LATCbits.LATC0 = 1;  // Turn on motor (assuming a pin for motor control)
+    } else {
+        LATCbits.LATC0 = 0;  // Turn off motor
+    }
+}
+
+// New function to log sensor data periodically via UART
+void UART_LogData(uint16_t temp_value, uint16_t sound_value, uint16_t speed_value, uint16_t gas_value) {
+    char log_buffer[100];
+    sprintf(log_buffer, "Log - Temp: %d, Sound: %d, Speed: %d, Gas: %d\n", temp_value, sound_value, speed_value, gas_value);
+    UART_WriteString(log_buffer);
+}
+
+// New function to manage system sleep mode for power saving
+void EnterSleepMode(void) {
+    LCD_Clear();
+    LCD_DisplayString("Entering Sleep Mode...");
+    __delay_ms(2000);
+    SLEEP();  // Enter low power sleep mode
+}
+
+// Function to wake up from sleep mode
+void WakeUp(void) {
+    // Perform any necessary wake-up routines here
+    LCD_Clear();
+    LCD_DisplayString("System Woken Up.");
+    __delay_ms(2000);
+}
+
+// Temperature sensor calibration function
+void CalibrateTemperatureSensor(uint16_t temp_value) {
+    // Example calibration algorithm (just for demonstration purposes)
+    if (temp_value < 100) {
+        temp_value = temp_value + 5;  // Offset for low values
+    } else if (temp_value > 900) {
+        temp_value = temp_value - 5;  // Offset for high values
+    }
+}
+
+// Speed sensor calibration function
+void CalibrateSpeedSensor(uint16_t speed_value) {
+    // Example calibration algorithm (just for demonstration purposes)
+    if (speed_value < 500) {
+        speed_value = speed_value + 10;  // Offset for low values
+    } else if (speed_value > 1500) {
+        speed_value = speed_value - 10;  // Offset for high values
+    }
+}
+
+// Gas sensor calibration function
+void CalibrateGasSensor(uint16_t gas_value) {
+    // Example calibration algorithm (just for demonstration purposes)
+    if (gas_value < 300) {
+        gas_value = gas_value + 20;  // Offset for low values
+    } else if (gas_value > 800) {
+        gas_value = gas_value - 20;  // Offset for high values
+    }
+}
+
+// Enhanced function to display sensor data with units on LCD
+void LCD_DisplayEnhancedData(uint16_t temp_value, uint16_t sound_value, uint16_t speed_value, uint16_t gas_value) {
+    LCD_Clear();
+    LCD_DisplayString("Temp: ");
+    LCD_DisplayNumber(temp_value);
+    LCD_DisplayString(" C");
+    __delay_ms(500);
+
+    LCD_Clear();
+    LCD_DisplayString("Sound: ");
+    LCD_DisplayNumber(sound_value);
+    LCD_DisplayString(" dB");
+    __delay_ms(500);
+
+    LCD_Clear();
+    LCD_DisplayString("Speed: ");
+    LCD_DisplayNumber(speed_value);
+    LCD_DisplayString(" km/h");
+    __delay_ms(500);
+
+    LCD_Clear();
+    LCD_DisplayString("Gas: ");
+    LCD_DisplayNumber(gas_value);
+    LCD_DisplayString(" ppm");
+    __delay_ms(500);
+}
+
+// New function to control an LED indicator for system status
+void LED_Control(uint8_t status) {
+    if (status == 1) {
+        LATDbits.LATD0 = 1;  // Turn on LED
+    } else {
+        LATDbits.LATD0 = 0;  // Turn off LED
+    }
+}
+
+// New function to initialize LED pin
+void LED_Init(void) {
+    TRISDbits.TRISD0 = 0;  // Set RD0 pin as output for LED
+}
+
+// Enhanced UART communication with sensor data timestamp
+void UART_SendDataWithTimestamp(uint16_t temp_value, uint16_t sound_value, uint16_t speed_value, uint16_t gas_value) {
+    char timestamp_buffer[50];
+    sprintf(timestamp_buffer, "Timestamp: %ld\n", __time);  // Assuming __time provides current timestamp
+    UART_WriteString(timestamp_buffer);
+
+    char uart_buffer[100];
+    sprintf(uart_buffer, "Temp: %d, Sound: %d, Speed: %d, Gas: %d\n", temp_value, sound_value, speed_value, gas_value);
+    UART_WriteString(uart_buffer);
+}
+
+// Main program
+void main() {
+    uint16_t temp_value, sound_value, speed_value, gas_value;
+    uint8_t system_status = 0;  // 0 for normal, 1 for alert
+
+    // Initialize hardware (LCD, ADC, UART)
+    LCD_Init();
+    ADC_Init();
+    UART_Init();
+    LED_Init();
+
+    while (1) {
+        // Read sensor values
+        temp_value = ADC_Read(TEMP_SENSOR_PIN);
+        sound_value = ADC_Read(SOUND_SENSOR_PIN);
+        speed_value = ADC_Read(SPEED_SENSOR_PIN);
+        gas_value = ADC_Read(GAS_SENSOR_PIN);
+
+        // Perform sensor calibration
+        CalibrateTemperatureSensor(temp_value);
+        CalibrateSpeedSensor(speed_value);
+        CalibrateGasSensor(gas_value);
+
+        // Check for errors and handle alerts
+        check_for_errors(temp_value, sound_value, speed_value, gas_value);
+
+        // Display enhanced data on LCD
+        LCD_DisplayEnhancedData(temp_value, sound_value, speed_value, gas_value);
+
+        // Send data via UART
+        UART_SendDataWithTimestamp(temp_value, sound_value, speed_value, gas_value);
+
+        // Control motor and LED based on sensor values
+        Motor_Control(speed_value);
+        LED_Control(system_status);
+
+        // Manage sleep mode based on conditions
+        if (temp_value < 100 && sound_value < 200) {
+            EnterSleepMode();
+        } else {
+            WakeUp();
+        }
+
+        // Delay between readings
+        __delay_ms(1000);  // Adjust delay as per required sampling rate
+    }
+}
+    LATB = (LATB & 0xC0) | (data & 0x0F);  // Send lower nibble
+    EN = 1;  // Enable pulse
+    __delay_ms(2);
+    EN = 0;
+}
+
+// Display string on LCD
+void LCD_DisplayString(const char* str) {
+    while (*str) {
+        LCD_Data(*str++);
+    }
+}
+
+// Display number on LCD
+void LCD_DisplayNumber(uint16_t num) {
+    char buffer[5];  // Buffer to hold string representation of number
+    sprintf(buffer, "%d", num);
+    LCD_DisplayString(buffer);
+}
+
+// Display Error on LCD
+void LCD_DisplayError(const char* errorMessage) {
+    LCD_Clear();
+    LCD_DisplayString("ERROR: ");
+    LCD_DisplayString(errorMessage);
+    __delay_ms(2000);
+}
+
+// Check sensor values for errors
+void check_for_errors(uint16_t temp_value, uint16_t sound_value, uint16_t speed_value, uint16_t gas_value) {
+    // Define error thresholds for each sensor
+    const uint16_t TEMP_THRESHOLD = 800;  // Example threshold for temperature
+    const uint16_t SOUND_THRESHOLD = 500; // Example threshold for sound level
+    const uint16_t SPEED_THRESHOLD = 1000; // Example threshold for speed
+    const uint16_t GAS_THRESHOLD = 300; // Example threshold for gas concentration
+
+    if (temp_value > TEMP_THRESHOLD) {
+        LCD_DisplayError("Temp High!");
+        UART_WriteString("Temperature exceeds threshold!\n");
+    }
+    if (sound_value > SOUND_THRESHOLD) {
+        LCD_DisplayError("Sound High!");
+        UART_WriteString("Sound exceeds threshold!\n");
+    }
+    if (speed_value > SPEED_THRESHOLD) {
+        LCD_DisplayError("Speed High!");
+        UART_WriteString("Speed exceeds threshold!\n");
+    }
+    if (gas_value > GAS_THRESHOLD) {
+        LCD_DisplayError("Gas High!");
+        UART_WriteString("Gas exceeds threshold!\n");
+    }
+}
+
+// Motor control function based on speed value
+void Motor_Control(uint16_t speed_value) {
+    // Example speed control threshold
+    const uint16_t MOTOR_SPEED_THRESHOLD = 500; // If speed exceeds 500, activate the motor
+
+    if (speed_value > MOTOR_SPEED_THRESHOLD) {
+        LATCbits.LATC0 = 1;  // Activate motor (assuming motor control pin is LATC0)
+        UART_WriteString("Motor ON: Speed exceeds threshold.\n");
+    } else {
+        LATCbits.LATC0 = 0;  // Deactivate motor
+        UART_WriteString("Motor OFF: Speed below threshold.\n");
+    }
+}
+
+// Main program logic for continuous monitoring
+void main() {
+    uint16_t temp_value, sound_value, speed_value, gas_value;
+
+    // Initialize hardware (LCD, ADC, UART)
+    LCD_Init();
+    ADC_Init();
+    UART_Init();
+
+    while (1) {
+        // Read sensor values
+        temp_value = ADC_Read(TEMP_SENSOR_PIN);
+        sound_value = ADC_Read(SOUND_SENSOR_PIN);
+        speed_value = ADC_Read(SPEED_SENSOR_PIN);
+        gas_value = ADC_Read(GAS_SENSOR_PIN);
+
+        // Check if any sensor value exceeds thresholds
+        check_for_errors(temp_value, sound_value, speed_value, gas_value);
+
+        // Display data on LCD
+        LCD_Clear();
+        LCD_DisplayString("Temp: ");
+        LCD_DisplayNumber(temp_value);
+        __delay_ms(500);
+
+        LCD_Clear();
+        LCD_DisplayString("Sound: ");
+        LCD_DisplayNumber(sound_value);
+        __delay_ms(500);
+
+        LCD_Clear();
+        LCD_DisplayString("Speed: ");
+        LCD_DisplayNumber(speed_value);
+        __delay_ms(500);
+
+        LCD_Clear();
+        LCD_DisplayString("Gas: ");
+        LCD_DisplayNumber(gas_value);
+        __delay_ms(500);
+
+        // Send data via UART for remote monitoring
+        char uart_buffer[100];
+        sprintf(uart_buffer, "Temp: %d, Sound: %d, Speed: %d, Gas: %d", temp_value, sound_value, speed_value, gas_value);
+        UART_WriteString(uart_buffer);
+
+        // Control motor if speed value exceeds threshold
+        Motor_Control(speed_value);
+
+        // Delay between readings
+        __delay_ms(1000);  // Adjust delay as per required sampling rate
+    }
+}
+
+// ADC Initialization
+void ADC_Init(void) {
+    // Configure the ADC module (Right justify result, VDD as reference)
+    ADCON1 = 0x00;  // Set all pins to analog input (AN0-AN3)
+    ADCON2 = 0x00;  // Set the ADC conversion time, VDD reference
+}
+
+// ADC Read function
+uint16_t ADC_Read(uint8_t channel) {
+    // Set ADC channel (AN0-AN3)
+    ADCON0 = (channel << 2);  
+    GO_nDONE = 1;  // Start the conversion
+    while (GO_nDONE);  // Wait for conversion to complete
+    return (ADRESH << 8) | ADRESL;  // Return the 10-bit ADC result
+}
+
+// UART Initialization
+void UART_Init(void) {
+    // Setup the UART for communication (9600 baud rate, assuming 4MHz clock)
+    TXSTAbits.TXEN = 1;  // Enable transmitter
+    RCSTAbits.CREN = 1;  // Enable receiver
+    SPBRG = 25;          // Set baud rate for 9600 (assuming 4 MHz Fosc)
+}
+
+// UART Write function
+void UART_Write(uint8_t data) {
+    while (!TXSTAbits.TRMT);  // Wait until the transmit buffer is empty
+    TXREG = data;             // Send the data byte
+}
+
+// UART Write String function
+void UART_WriteString(const char* str) {
+    while (*str) {
+        UART_Write(*str++);  // Write each character until the null terminator
+    }
+}
+
+// LCD Initialization
+void LCD_Init(void) {
+    // Set control pins as output
+    TRISB = 0x00;  // Set all PORTB pins as output for the LCD control pins
+
+    // Initial LCD setup sequence (depends on the LCD module you're using)
+    __delay_ms(15);  // Wait for LCD to power up
+    LCD_Command(0x33);  // Initialize LCD (step 1)
+    LCD_Command(0x32);  // Initialize LCD (step 2)
+    LCD_Command(0x28);  // 4-bit mode, 2 lines, 5x7 font
+    LCD_Command(0x0C);  // Display ON, Cursor OFF
+    LCD_Command(0x06);  // Entry mode: Increment, no shift
+    LCD_Command(0x01);  // Clear display
+}
+
+// Send command to LCD
+void LCD_Command(uint8_t cmd) {
+    RS = 0;  // Select Command Register
+    LATB = (LATB & 0xC0) | (cmd >> 4);  // Send higher nibble
+    EN = 1;  // Enable pulse
+    __delay_ms(2);
+    EN = 0;
+    LATB = (LATB & 0xC0) | (cmd & 0x0F);  // Send lower nibble
+    EN = 1;  // Enable pulse
+    __delay_ms(2);
+    EN = 0;
+}
